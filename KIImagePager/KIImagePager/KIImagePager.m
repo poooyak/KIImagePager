@@ -81,6 +81,7 @@
     self.captionTextColor = [UIColor blackColor];
     self.captionFont = [UIFont fontWithName:@"Helvetica-Light" size:12.0f];
     self.hidePageControlForSinglePages = YES;
+    self.infinitScroll = YES;
     
     [self initializeScrollView];
     [self initializePageControl];
@@ -186,61 +187,21 @@
     [self updateCaptionLabelForImageAtIndex:0];
     
     if([aImageUrls count] > 0) {
-        [_scrollView setContentSize:CGSizeMake(_scrollView.frame.size.width * [aImageUrls count],
+        [_scrollView setContentSize:CGSizeMake(_scrollView.frame.size.width * ([aImageUrls count] + 2 ),
                                                _scrollView.frame.size.height)];
-        
-        for (int i = 0; i < [aImageUrls count]; i++) {
-            CGRect imageFrame = CGRectMake(_scrollView.frame.size.width * i, 0, _scrollView.frame.size.width, _scrollView.frame.size.height);
-            UIImageView *imageView = [[UIImageView alloc] initWithFrame:imageFrame];
-            [imageView setBackgroundColor:[UIColor clearColor]];
-            [imageView setContentMode:[_dataSource contentModeForImage:i inPager:self]];
-            [imageView setTag:i];
+        [self addImageViewToScrollView:[aImageUrls count]-1 frameIndexInScrollView:0];
 
-            if([[aImageUrls objectAtIndex:i] isKindOfClass:[UIImage class]]) {
-                // Set ImageView's Image directly
-                [imageView setImage:(UIImage *)[aImageUrls objectAtIndex:i]];
-            } else if([[aImageUrls objectAtIndex:i] isKindOfClass:[NSString class]] ||
-                      [[aImageUrls objectAtIndex:i] isKindOfClass:[NSURL class]]) {
-                // Instantiate and show Actvity Indicator
-                UIActivityIndicatorView *activityIndicator = [UIActivityIndicatorView new];
-                activityIndicator.center = (CGPoint){_scrollView.frame.size.width/2, _scrollView.frame.size.height/2};
-                activityIndicator.activityIndicatorViewStyle = UIActivityIndicatorViewStyleWhite;
-                [imageView addSubview:activityIndicator];
-                [activityIndicator startAnimating];
-                [_activityIndicators setObject:activityIndicator forKey:[NSString stringWithFormat:@"%d", i]];
-                
-                // Asynchronously retrieve image
-                NSURL * imageUrl  = [[aImageUrls objectAtIndex:i] isKindOfClass:[NSURL class]] ? [aImageUrls objectAtIndex:i] : [NSURL URLWithString:(NSString *)[aImageUrls objectAtIndex:i]];
-                
-                //image source is responsible for image retreiving/caching, etc...
-                [self.imageSource imageWithUrl:imageUrl
-                                    completion:^(UIImage *image, NSError *error)
-                 {
-                     if(!error) [imageView setImage:image];//should we handle error?
-                     else [imageView setImage:nil];
-                     
-                     // Stop and Remove Activity Indicator
-                     UIActivityIndicatorView *indicatorView = (UIActivityIndicatorView *)[_activityIndicators objectForKey:[NSString stringWithFormat:@"%d", i]];
-                     if (indicatorView) {
-                         [indicatorView stopAnimating];
-                         [_activityIndicators removeObjectForKey:[NSString stringWithFormat:@"%d", i]];
-                     }
-                 }];
-            }
-            
-            // Add GestureRecognizer to ImageView
-            UITapGestureRecognizer *singleTapGestureRecognizer = [[UITapGestureRecognizer alloc]
-                                                                  initWithTarget:self
-                                                                  action:@selector(imageTapped:)];
-            [singleTapGestureRecognizer setNumberOfTapsRequired:1];
-            [imageView addGestureRecognizer:singleTapGestureRecognizer];
-            [imageView setUserInteractionEnabled:YES];
-            
-            [_scrollView addSubview:imageView];
+        for (int i = 0; i < [aImageUrls count]; i++) {
+            [self addImageViewToScrollView:i frameIndexInScrollView:(i+1)];
         }
+        
+        [self addImageViewToScrollView:0 frameIndexInScrollView:[aImageUrls count]+1];
+
         
         [_countLabel setText:[NSString stringWithFormat:@"%lu", (unsigned long)[[_dataSource arrayWithImages:self] count]]];
         _pageControl.numberOfPages = [(NSArray *)[_dataSource arrayWithImages:self] count];
+        self.currentPage = 1;
+
     } else {
         UIImageView *blankImage = [[UIImageView alloc] initWithFrame:_scrollView.frame];
         if ([_dataSource respondsToSelector:@selector(placeHolderImageForImagePager:)]) {
@@ -251,6 +212,58 @@
         }
         [_scrollView addSubview:blankImage];
     }
+}
+
+-(void)addImageViewToScrollView:(NSInteger)imageIndex frameIndexInScrollView:(NSInteger)frameIndexInScrollView{
+    NSArray *aImageUrls = (NSArray *)[_dataSource arrayWithImages:self];
+    CGRect imageFrame = CGRectMake(_scrollView.frame.size.width * frameIndexInScrollView, 0, _scrollView.frame.size.width, _scrollView.frame.size.height);
+    UIImageView *imageView = [[UIImageView alloc] initWithFrame:imageFrame];
+    [imageView setBackgroundColor:[UIColor clearColor]];
+    [imageView setContentMode:[_dataSource contentModeForImage:imageIndex inPager:self]];
+    [imageView setTag:imageIndex];
+    
+    if([[aImageUrls objectAtIndex:imageIndex] isKindOfClass:[UIImage class]]) {
+        // Set ImageView's Image directly
+        [imageView setImage:(UIImage *)[aImageUrls objectAtIndex:imageIndex]];
+    } else if([[aImageUrls objectAtIndex:imageIndex] isKindOfClass:[NSString class]] ||
+              [[aImageUrls objectAtIndex:imageIndex] isKindOfClass:[NSURL class]]) {
+        // Instantiate and show Actvity Indicator
+        UIActivityIndicatorView *activityIndicator = [UIActivityIndicatorView new];
+        activityIndicator.center = (CGPoint){_scrollView.frame.size.width/2, _scrollView.frame.size.height/2};
+        activityIndicator.activityIndicatorViewStyle = UIActivityIndicatorViewStyleWhite;
+        [imageView addSubview:activityIndicator];
+        [activityIndicator startAnimating];
+        [_activityIndicators setObject:activityIndicator forKey:[NSString stringWithFormat:@"%ld", (long)imageIndex]];
+        
+        // Asynchronously retrieve image
+        NSURL * imageUrl  = [[aImageUrls objectAtIndex:imageIndex] isKindOfClass:[NSURL class]] ? [aImageUrls objectAtIndex:imageIndex] : [NSURL URLWithString:(NSString *)[aImageUrls objectAtIndex:imageIndex]];
+        
+        //image source is responsible for image retreiving/caching, etc...
+        [self.imageSource imageWithUrl:imageUrl
+                            completion:^(UIImage *image, NSError *error)
+         {
+             if(!error) [imageView setImage:image];//should we handle error?
+             else [imageView setImage:nil];
+             
+             // Stop and Remove Activity Indicator
+             UIActivityIndicatorView *indicatorView = (UIActivityIndicatorView *)[_activityIndicators objectForKey:[NSString stringWithFormat:@"%ld", (long)imageIndex]];
+             if (indicatorView) {
+                 [indicatorView stopAnimating];
+                 [_activityIndicators removeObjectForKey:[NSString stringWithFormat:@"%ld", (long)imageIndex]];
+             }
+         }];
+    }
+    
+    // Add GestureRecognizer to ImageView
+    UITapGestureRecognizer *singleTapGestureRecognizer = [[UITapGestureRecognizer alloc]
+                                                          initWithTarget:self
+                                                          action:@selector(imageTapped:)];
+    [singleTapGestureRecognizer setNumberOfTapsRequired:1];
+    [imageView addGestureRecognizer:singleTapGestureRecognizer];
+    [imageView setUserInteractionEnabled:YES];
+    
+    [_scrollView addSubview:imageView];
+
 }
 
 - (void) imageTapped:(UITapGestureRecognizer *)sender
@@ -308,16 +321,39 @@
     if([_slideshowTimer isValid]) {
         [_slideshowTimer invalidate];
     }
-    [self checkWetherToToggleSlideshowTimer];
+    //[self checkWetherToToggleSlideshowTimer];
 }
 
 - (void) scrollViewDidEndDecelerating:(UIScrollView *)scrollView
 {
     long currentPage = lround((float)scrollView.contentOffset.x / scrollView.frame.size.width);
-    _pageControl.currentPage = currentPage;
+    int numSlides = (scrollView.contentSize.width / scrollView.frame.size.width)-2;
+    if(currentPage == 0)
+        self.currentPage = numSlides;
+    else if(currentPage == numSlides + 2)
+        self.currentPage = 1;
+    self.currentPage = currentPage;
     
-    [self updateCaptionLabelForImageAtIndex:currentPage];
-    [self fireDidScrollToIndexDelegateForPage:currentPage];
+    [self checkWetherToToggleSlideshowTimer];
+    
+    [self fireDidScrollToIndexDelegateForPage:self.currentPage];
+
+}
+
+- (void)scrollViewDidScroll:(UIScrollView *)sender {
+    
+    int numSlides = (sender.contentSize.width / sender.frame.size.width)-2;
+    
+    //going forward -- reset content offset
+    if([sender contentOffset].x >= ((numSlides+1) * sender.frame.size.width)){
+        [_scrollView setContentOffset: CGPointMake(sender.frame.size.width, 0)];
+    }
+    //going backwards -- reset content offset
+    if([sender contentOffset].x < 1){
+        [_scrollView setContentOffset: CGPointMake(numSlides * sender.frame.size.width, 0)];
+    }
+    
+    
 }
 
 #pragma mark - Delegate Helper
@@ -343,15 +379,15 @@
 #pragma mark - Slideshow
 - (void) slideshowTick:(NSTimer *)timer
 {
-    NSUInteger nextPage = 0;
-    if([_pageControl currentPage] < ([[_dataSource arrayWithImages:self] count] - 1)) {
-        nextPage = [_pageControl currentPage] + 1;
+    NSUInteger nextPage = 1;
+    if( self.currentPage <= ([[_dataSource arrayWithImages:self] count])) {
+        nextPage = self.currentPage + 1;
     }
-
-    [_scrollView scrollRectToVisible:CGRectMake(self.frame.size.width * nextPage, 0, self.frame.size.width, self.frame.size.width) animated:YES];
-    [_pageControl setCurrentPage:nextPage];
     
-    [self updateCaptionLabelForImageAtIndex:nextPage];
+    //[_scrollView scrollRectToVisible:CGRectMake(self.frame.size.width * nextPage, 0, self.frame.size.width, self.frame.size.width) animated:YES];
+    self.currentPage = nextPage;
+    
+    //[self updateCaptionLabelForImageAtIndex:nextPage];
     
     if (self.slideshowShouldCallScrollToDelegate) {
         [self fireDidScrollToIndexDelegateForPage:nextPage];
@@ -362,6 +398,9 @@
 {
     if (_slideshowTimeInterval > 0) {
         if ([(NSArray *)[_dataSource arrayWithImages:self] count] > 1) {
+            if([_slideshowTimer isValid]) {
+                [_slideshowTimer invalidate];
+            }
             _slideshowTimer = [NSTimer scheduledTimerWithTimeInterval:_slideshowTimeInterval target:self selector:@selector(slideshowTick:) userInfo:nil repeats:YES];
         }
     }
@@ -420,7 +459,7 @@
 
 - (NSUInteger) currentPage
 {
-    return [_pageControl currentPage];
+    return [_pageControl currentPage]+1;
 }
 
 - (void) setCurrentPage:(NSUInteger)currentPage
@@ -430,9 +469,9 @@
 
 - (void) setCurrentPage:(NSUInteger)currentPage animated:(BOOL)animated
 {
-    NSAssert((currentPage < [(NSArray *)[_dataSource arrayWithImages:self] count]), @"currentPage must not exceed maximum number of images");
+  //  NSAssert((currentPage < [(NSArray *)[_dataSource arrayWithImages:self] count]), @"currentPage must not exceed maximum number of images");
     
-    [_pageControl setCurrentPage:currentPage];
+    [_pageControl setCurrentPage:currentPage-1];
     [_scrollView scrollRectToVisible:CGRectMake(self.frame.size.width * currentPage, 0, self.frame.size.width, self.frame.size.width) animated:animated];
 }
 
